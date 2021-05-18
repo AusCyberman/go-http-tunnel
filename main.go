@@ -82,7 +82,7 @@ func (s httphandler) fetch_http() error {
 
 		case <-time.After(100 * time.Millisecond):
 		}
-		buf := bytes.NewBuffer(data.message)
+		buf := bytes.NewBuffer(data.message[:data.seq_length])
 		if resp, err := http.Post("http://127.0.0.1:8080", "text", buf); err != nil && !errors.Is(err, io.EOF) {
 			s.errors <- err
 		} else {
@@ -117,14 +117,11 @@ func (s httphandler) process_tcp() {
 	case CLIENT:
 		sock_string = "127.0.0.1:65534"
 	}
-	socket, err := net.Listen("tcp", sock_string)
-	if err != nil {
-		s.fatal_errors <- err
-	}
+	var err error
 	var client net.Conn
 	for {
 		if client == nil {
-			client, err = socket.Accept()
+			client, err = net.Dial("tcp", sock_string)
 			if err != nil {
 				s.errors <- err
 			}
@@ -132,7 +129,7 @@ func (s httphandler) process_tcp() {
 		}
 		select {
 		case message := <-s.http_input:
-			if n, err := client.Write(message.message); err != nil {
+			if n, err := client.Write(message.message[:message.seq_length]); err != nil {
 				s.errors <- err
 				client = nil
 			} else if n == 0 {
