@@ -1,7 +1,8 @@
 package main
 
 import (
-	"bytes"
+	"encoding/base64"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -50,23 +51,32 @@ func (s httphandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	fmt.Println("got request")
 	switch req.Method {
 	case http.MethodPost:
-		buf := make([]byte, 10)
-		if num, err := req.Body.Read(buf); err != nil && !errors.Is(err, io.EOF) {
-			println(err)
+		decoder := gob.NewDecoder(base64.NewDecoder(base64.RawStdEncoding, req.Body))
+		mes := EMPTY_MESSAGE
+		if err := decoder.Decode(&mes); err != nil {
 			s.errors <- err
-		} else if num != 0 {
-			fmt.Println("data: ", string(buf[:num]))
-			println("length is", num)
-			s.http_input <- message{int64(num), buf}
+		} else {
+			s.http_input <- mes
 		}
+		//		buf := make([]byte, 10)
+		//		if num, err := req.Body.Read(buf); err != nil && !errors.Is(err, io.EOF) {
+		//			println(err)
+		//			s.errors <- err
+		//		} else if num != 0 {
+		//			fmt.Println("data: ", string(buf[:num]))
+		//			println("length is", num)
+		//			s.http_input <- message{int64(num), buf}
+		//		}
 	}
 	fmt.Println("stuff")
 	select {
 	case available := <-s.tcp_input:
 		fmt.Println("there is data")
-		if _, err := writer.Write(available.message); err != nil {
-			s.errors <- err
-		}
+		encoder := gob.NewEncoder(base64.NewEncoder(base64.RawStdEncoding, writer))
+		encoder.Encode(available)
+		//		if _, err := writer.Write(available.message); err != nil {
+		//			s.errors <- err
+		//		}
 	default:
 		writer.WriteHeader(http.StatusOK)
 	}
@@ -82,17 +92,26 @@ func (s httphandler) fetch_http() error {
 
 		case <-time.After(100 * time.Millisecond):
 		}
-		buf := bytes.NewBuffer(data.message[:data.seq_length])
-		if resp, err := http.Post("http://127.0.0.1:8080", "text", buf); err != nil && !errors.Is(err, io.EOF) {
+		reader, writer := io.Pipe()
+		encode := gob.NewEncoder(base64.NewEncoder(base64.RawStdEncoding, writer))
+		encode.Encode(data)
+		if resp, err := http.Post("http://127.0.0.1:8080", "text", reader); err != nil && !errors.Is(err, io.EOF) {
 			s.errors <- err
 		} else {
-			buf := make([]byte, 100)
-			if num, err := resp.Body.Read(buf); err != nil && !errors.Is(err, io.EOF) {
+			decoder := gob.NewDecoder(base64.NewDecoder(base64.RawStdEncoding, resp.Body))
+			mes := EMPTY_MESSAGE
+			if err := decoder.Decode(&mes); err != nil {
 				s.errors <- err
-			} else if num != 0 {
-				fmt.Println(string(buf[:num]))
-				s.http_input <- message{int64(num), buf}
+			} else {
+				s.http_input <- mes
 			}
+			//			buf := make([]byte, 100)
+			//			if num, err := resp.Body.Read(buf); err != nil && !errors.Is(err, io.EOF) {
+			//				s.errors <- err
+			//			} else if num != 0 {
+			//				fmt.Println(string(buf[:num]))
+			//				s.http_input <- message{int64(num), buf}
+			//			}
 
 		}
 	}
